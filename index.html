@@ -366,7 +366,23 @@ function initMap(){
     const m = L.marker([coord[0], coord[1]], {icon:icon, interactive:true, opacity:0});
     m.addTo(map);
     m.bindTooltip('', {direction:'top', offset:[0,-ARROW_HALF], sticky:true});
+    m.on('mouseover', function(){
+      // With 156 closely-spaced arrow markers, fast cursor movement can
+      // occasionally leave a previous marker's tooltip open when the
+      // browser coalesces mousemove events and Leaflet's own mouseout
+      // doesn't fire cleanly. Defensively close any other open tooltip
+      // before this one is shown.
+      windLayer.forEach(function(entry){
+        if (entry.marker !== m) entry.marker.closeTooltip();
+      });
+    });
     windLayer.push({marker:m, name:name});
+  });
+
+  // Extra safety net: if the cursor leaves the map entirely, make sure no
+  // wind tooltip is left stuck open.
+  map.getContainer().addEventListener('mouseleave', function(){
+    windLayer.forEach(function(entry){ entry.marker.closeTooltip(); });
   });
 
   tyCircle = L.circleMarker([0,0], {
