@@ -100,7 +100,7 @@ header .spacer{ flex:1; }
 
 /* ===== Body layout ===== */
 #body{ flex:1; display:flex; min-height:0; }
-#map{ flex:1; background:#0a1420; position:relative; }
+#map{ flex:1; min-width:0; background:#0a1420; position:relative; }
 .leaflet-container{ background:#0a1420; }
 /* Dark map look matched to reference (typhoon_track_finder.html):
    invert the light GSI "pale" tiles and re-tint them. */
@@ -115,6 +115,19 @@ header .spacer{ flex:1; }
   border-left:1px solid var(--line);
   display:flex; flex-direction:column; overflow-y:auto;
   padding:16px 18px 18px 18px;
+}
+
+/* Narrow screens: #map has a hard floor below which it becomes unusable, so
+   below that width stack the map above the side panel instead of squeezing
+   them side-by-side (which used to push #side, and its mode-toggle button,
+   partly or fully out of view). */
+@media (max-width: 860px){
+  #body{ flex-direction:column; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  #map{ flex:none; width:100%; height:46vh; min-height:260px; }
+  #side{
+    width:100%; flex-shrink:0; overflow-y:visible;
+    border-left:none; border-top:1px solid var(--line);
+  }
 }
 #side h2{
   font-family:var(--serif); font-size:15px; margin:0 0 2px 0; color:var(--paper);
