@@ -1,4 +1,4 @@
-# 上陸台風観測雨風マップ
+# 上陸台風雨風マップ
 
 https://awg-yk.github.io/typhoon_landfall_wind/
 
