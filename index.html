@@ -17,6 +17,7 @@
   --amber-bright:#f4b45c;
   --red:#c1503f;
   --teal:#5fa3a3;
+  --rain:#6f8fe0;
   --text:#e9e4d6;
   --text-dim:#9db2c4;
   --mono: "JetBrains Mono","SFMono-Regular",Consolas,monospace;
@@ -179,6 +180,34 @@ hr.rule{ border:none; border-top:1px solid var(--line); margin:12px 0; }
 
 /* Wind arrow marker */
 .wind-arrow{ pointer-events:none; }
+
+.mode-toggle{
+  display:flex; gap:0; margin:10px 0 4px 0; border:1px solid var(--line);
+  border-radius:3px; overflow:hidden;
+}
+.mode-btn{
+  flex:1; font-family:var(--mono); font-size:11px; letter-spacing:.03em;
+  padding:7px 6px; background:var(--panel-2); color:var(--text-dim);
+  border:none; cursor:pointer; transition:background .15s,color .15s;
+}
+.mode-btn + .mode-btn{ border-left:1px solid var(--line); }
+.mode-btn:hover{ color:var(--text); }
+.mode-btn.active[data-mode="wind"]{ background:var(--amber); color:var(--ink); }
+.mode-btn.active[data-mode="rain"]{ background:var(--rain); color:var(--ink); }
+
+.ty-mark-wrap{ pointer-events:none; }
+.ty-mark{
+  display:flex; flex-direction:column; align-items:center; line-height:1.15;
+  white-space:nowrap; font-family:var(--mono);
+}
+.ty-mark .ty-pres{
+  font-size:10px; font-weight:700; color:#fff;
+  text-shadow:0 0 3px #000, 0 0 3px #000, 0 0 3px #000, 0 1px 1px #000;
+}
+.ty-mark .ty-code{
+  font-size:16px; font-weight:900; color:#e5342a; letter-spacing:.02em;
+  text-shadow:0 0 3px #000, 0 0 3px #000, 0 0 3px #000, 0 1px 1px #000;
+}
 .typhoon-eye{ pointer-events:none; }
 
 .leaflet-tooltip{
@@ -239,6 +268,11 @@ hr.rule{ border:none; border-top:1px solid var(--line); margin:12px 0; }
       <h2 id="side-name-ja">&nbsp;</h2>
       <div class="storm-en" id="side-name-en">&nbsp;</div>
 
+      <div class="mode-toggle" id="mode-toggle">
+        <button type="button" class="mode-btn active" data-mode="wind">風 Wind</button>
+        <button type="button" class="mode-btn" data-mode="rain">雨 Rain</button>
+      </div>
+
       <div class="readout" id="readout">
         <div class="k">日時</div><div class="v" id="v-time">&mdash;</div>
         <div class="k">中心気圧</div><div class="v big" id="v-pres">&mdash;</div>
@@ -247,13 +281,13 @@ hr.rule{ border:none; border-top:1px solid var(--line); margin:12px 0; }
       </div>
 
       <hr class="rule">
-      <div class="section-label">Wind Legend / 風の凡例</div>
+      <div class="section-label" id="legend-title">Wind Legend / 風の凡例</div>
       <div id="legend-wind"></div>
 
       <hr class="rule">
       <div class="section-label">About</div>
       <div style="font-size:11px; line-height:1.7; color:var(--text-dim);">
-        矢印は風が吹いていく方向、長さと色は風速(m/s)を表します。台風の中心（オレンジの円）は気象庁ベストトラックに基づきます。経路線は、実線（オレンジ）が通過済み、破線（水色）がこの後進む経路です。
+        「風」表示では矢印が風の吹いていく方向、長さと色が風速(m/s)を表します。「雨」表示では丸の大きさと色が1時間降水量(mm)を表します。台風の中心（赤文字のTD/TS/STS/T/L）は気象庁ベストトラックに基づき、上に中心気圧を表示します。経路線は、実線（オレンジ）が通過済み、破線（水色）がこの後進む経路です。
       </div>
     </div>
   </div>
@@ -281,11 +315,39 @@ hr.rule{ border:none; border-top:1px solid var(--line); margin:12px 0; }
 const DATA = { stationNames: [], stationCoords: [], storms: {} };
 let STORM_META = {};   // code -> {name, year}, from data/index.json (tiny, loaded up front)
 let STORM_ORDER = [];
-const GRADE_LABEL = {"1":"熱帯低気圧","2":"熱帯低気圧","3":"熱帯暴風雨","4":"強い熱帯暴風雨","5":"台風","6":"温帯低気圧","7":"熱帯低気圧","9":"台風(推定強度)"};
-const GRADE_COLOR = {"1":"#5fa3a3","2":"#5fa3a3","3":"#e0913a","4":"#e0913a","5":"#c1503f","6":"#6f8fb0","7":"#5fa3a3","9":"#c1503f"};
+// JMA best-track "階級" (grade) codes:
+//   2, 9 = 熱帯低気圧 (Tropical Depression)
+//   3    = 台風 (Tropical Storm)
+//   4    = 台風 (Severe Tropical Storm)
+//   5    = 台風 (Typhoon)
+//   6    = 温帯低気圧 (extratropical low)
+//   7    = RSMC東京の監視区域に入ったことを示すコード（強度分類ではない）
+//   1, 8 = 通常使用しない
+const GRADE_LABEL = {
+  "2":"Tropical Depression(熱帯低気圧)",
+  "9":"Tropical Depression(熱帯低気圧)",
+  "3":"Tropical Storm(台風)",
+  "4":"Severe Tropical Storm(台風)",
+  "5":"Typhoon(台風)",
+  "6":"温帯低気圧",
+  "7":"熱帯低気圧"
+};
 
-let map, tyMarker, tyCircle, trackLine, trackPastLine, trackHitLine;
+function gradeCode(grade){
+  // Short red label drawn at the storm center on the map.
+  switch(grade){
+    case '2': case '9': return 'TD';
+    case '3': return 'TS';
+    case '4': return 'STS';
+    case '5': return 'T';
+    case '6': return 'L';
+    default: return grade; // rare/unused codes (1, 7, 8): show the raw code rather than guessing
+  }
+}
+
+let map, tyMarker, trackLine, trackPastLine, trackHitLine;
 let windLayer = []; // array of {marker, station index}
+let displayMode = 'wind'; // 'wind' | 'rain'
 let currentStormCode = null;
 let currentIdx = 0;
 let playing = false;
@@ -366,13 +428,30 @@ function initMap(){
     const m = L.marker([coord[0], coord[1]], {icon:icon, interactive:true, opacity:0});
     m.addTo(map);
     m.bindTooltip('', {direction:'top', offset:[0,-ARROW_HALF], sticky:true});
+    m.on('mouseover', function(){
+      // With 156 closely-spaced arrow markers, fast cursor movement can
+      // occasionally leave a previous marker's tooltip open when the
+      // browser coalesces mousemove events and Leaflet's own mouseout
+      // doesn't fire cleanly. Defensively close any other open tooltip
+      // before this one is shown.
+      windLayer.forEach(function(entry){
+        if (entry.marker !== m) entry.marker.closeTooltip();
+      });
+    });
     windLayer.push({marker:m, name:name});
   });
 
-  tyCircle = L.circleMarker([0,0], {
-    radius:9, color:'#f4b45c', weight:2, fillColor:'#c1503f', fillOpacity:.85
+  // Extra safety net: if the cursor leaves the map entirely, make sure no
+  // wind tooltip is left stuck open.
+  map.getContainer().addEventListener('mouseleave', function(){
+    windLayer.forEach(function(entry){ entry.marker.closeTooltip(); });
+  });
+
+  tyMarker = L.marker([0,0], {
+    icon: L.divIcon({className:'ty-mark-wrap', html:'', iconSize:[70,32], iconAnchor:[35,24]}),
+    interactive:true, opacity:0
   }).addTo(map);
-  tyCircle.bindTooltip('', {permanent:false, direction:'top'});
+  tyMarker.bindTooltip('', {permanent:false, direction:'top'});
 }
 
 const ARROW_SIZE = 42; // px, marker bounding box (was 26)
@@ -396,15 +475,50 @@ function speedColor(spd){
   return '#c1503f';
 }
 
+function rainColor(mm){
+  // Blue -> purple -> magenta scale, deliberately distinct from the
+  // teal/yellow/orange/red wind scale so the two modes are never confused
+  // at a glance. Exactly-zero (measured, no rain) gets a dim neutral color
+  // separate from the lightest rain bucket, mirroring how calm wind is
+  // shown as a small dim dot rather than blending into the speed scale.
+  if (mm <= 0) return '#3a4a5a';
+  if (mm < 1) return '#5f7fa3';
+  if (mm < 5) return '#5a7fd0';
+  if (mm < 10) return '#6f5fd0';
+  if (mm < 20) return '#9c4fd0';
+  if (mm < 30) return '#c23fa8';
+  if (mm < 50) return '#c23f6a';
+  return '#8f1f3f';
+}
+
+function rainCircleSVG(mm, color){
+  const r = mm > 0 ? Math.min(3 + mm * 0.32, 17) : 2.4;
+  return '<svg width="' + ARROW_SIZE + '" height="' + ARROW_SIZE + '" viewBox="-' + ARROW_HALF + ' -' + ARROW_HALF + ' ' + ARROW_SIZE + ' ' + ARROW_SIZE + '">' +
+    '<circle cx="0" cy="0" r="' + r + '" fill="' + color + '" fill-opacity="0.8" stroke="' + color + '" stroke-width="1"/>' +
+    '</svg>';
+}
+
 function buildLegend(){
   const el = document.getElementById('legend-wind');
-  const stops = [
-    [3, '0-5 m/s'], [8, '5-10'], [13,'10-15'], [18,'15-20'], [23,'20-25'], [28,'25+']
-  ];
+  const title = document.getElementById('legend-title');
   let html = '';
-  stops.forEach(function(s){
-    html += '<div class="row">' + arrowSVG(0, s[0], speedColor(s[0])) + '<span>' + s[1] + '</span></div>';
-  });
+  if (displayMode === 'rain'){
+    title.textContent = 'Rain Legend / 雨の凡例（1時間降水量）';
+    const stops = [
+      [0, '0mm'], [3, '1-5'], [8, '5-10'], [15,'10-20'], [25,'20-30'], [40,'30-50'], [60,'50+']
+    ];
+    stops.forEach(function(s){
+      html += '<div class="row">' + rainCircleSVG(s[0], rainColor(s[0])) + '<span>' + s[1] + ' mm/h</span></div>';
+    });
+  } else {
+    title.textContent = 'Wind Legend / 風の凡例';
+    const stops = [
+      [3, '0-5 m/s'], [8, '5-10'], [13,'10-15'], [18,'15-20'], [23,'20-25'], [28,'25+']
+    ];
+    stops.forEach(function(s){
+      html += '<div class="row">' + arrowSVG(0, s[0], speedColor(s[0])) + '<span>' + s[1] + '</span></div>';
+    });
+  }
   el.innerHTML = html;
 }
 
@@ -670,14 +784,21 @@ function updateFrame(pos){
   // typhoon center (interpolated)
   const tp = findTrackAt(s.track, timeMs);
   if (tp && tp.lat != null){
-    tyCircle.setLatLng([tp.lat, tp.lon]);
-    tyCircle.setStyle({opacity:1, fillOpacity:.85, color: GRADE_COLOR[tp.grade]||'#f4b45c'});
-    tyCircle.setTooltipContent(s.name + ' ' + Math.round(tp.pres) + 'hPa');
-    document.getElementById('v-pres').textContent = Math.round(tp.pres) + ' hPa';
+    const code = gradeCode(tp.grade);
+    const presTxt = Number.isFinite(tp.pres) ? Math.round(tp.pres) + 'hPa' : '';
+    tyMarker.setLatLng([tp.lat, tp.lon]);
+    tyMarker.setIcon(L.divIcon({
+      className:'ty-mark-wrap',
+      html:'<div class="ty-mark"><span class="ty-pres">' + presTxt + '</span><span class="ty-code">' + code + '</span></div>',
+      iconSize:[70,32], iconAnchor:[35,24]
+    }));
+    tyMarker.setOpacity(1);
+    tyMarker.setTooltipContent(s.name + ' ' + presTxt);
+    document.getElementById('v-pres').textContent = presTxt || '—';
     document.getElementById('v-grade').textContent = GRADE_LABEL[tp.grade] || tp.grade;
     document.getElementById('v-pos').textContent = tp.lat.toFixed(1) + '°N, ' + tp.lon.toFixed(1) + '°E';
   } else {
-    tyCircle.setStyle({opacity:0, fillOpacity:0});
+    tyMarker.setOpacity(0);
     document.getElementById('v-pres').textContent = '—';
     document.getElementById('v-grade').textContent = '—';
     document.getElementById('v-pos').textContent = '台風域外';
@@ -693,11 +814,28 @@ function updateFrame(pos){
   trackPastLine.setLatLngs(pastPts);
   trackLine.setLatLngs(futPts.length ? [pastPts[pastPts.length-1]].concat(futPts) : []);
 
-  // wind arrows
+  // wind arrows / rain circles at each station
   const wind = s.wind;
+  const rain = s.rain;
   for (let i=0;i<windLayer.length;i++){
-    const w = wind[i][idx];
     const entry = windLayer[i];
+
+    if (displayMode === 'rain'){
+      const mm = rain ? rain[i][idx] : null;
+      if (mm === null || mm === undefined){
+        entry.marker.setOpacity(0);
+        continue;
+      }
+      entry.marker.setOpacity(1);
+      const color = rainColor(mm);
+      const html = rainCircleSVG(mm, color);
+      const tip = entry.name + '<br>' + mm.toFixed(1) + ' mm/h';
+      entry.marker.setIcon(L.divIcon({className:'wind-arrow', html:html, iconSize:[ARROW_SIZE,ARROW_SIZE], iconAnchor:[ARROW_SIZE/2,ARROW_SIZE/2]}));
+      entry.marker.setTooltipContent(tip);
+      continue;
+    }
+
+    const w = wind[i][idx];
     if (!w){
       entry.marker.setOpacity(0);
       continue;
@@ -759,6 +897,19 @@ document.addEventListener('DOMContentLoaded', function(){
 
     document.getElementById('storm-prev').addEventListener('click', function(){ stepStorm(-1); });
     document.getElementById('storm-next').addEventListener('click', function(){ stepStorm(1); });
+
+    document.querySelectorAll('.mode-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        const mode = btn.dataset.mode;
+        if (mode === displayMode) return;
+        displayMode = mode;
+        document.querySelectorAll('.mode-btn').forEach(function(b){
+          b.classList.toggle('active', b.dataset.mode === mode);
+        });
+        buildLegend();
+        if (currentStormCode && DATA.storms[currentStormCode]) updateFrame(currentIdx);
+      });
+    });
 
     document.getElementById('slider').addEventListener('input', function(e){
       if (playing) pause();
